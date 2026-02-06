@@ -73,6 +73,8 @@ OCI_OUTPUT=$(mktemp)
 OCI_ERROR=$(mktemp)
 trap "rm -f $OCI_OUTPUT $OCI_ERROR" EXIT
 
+# Desactivar exit on error temporalmente para capturar el código de salida
+set +e
 if [ "$IS_CLOUD_SHELL" = true ]; then
     oci iam region list --auth security_token > "$OCI_OUTPUT" 2> "$OCI_ERROR"
     OCI_EXIT_CODE=$?
@@ -80,6 +82,7 @@ else
     oci iam region list --profile "$OCI_PROFILE" > "$OCI_OUTPUT" 2> "$OCI_ERROR"
     OCI_EXIT_CODE=$?
 fi
+set -e
 
 if [ $OCI_EXIT_CODE -ne 0 ]; then
     echo -e "${RED}Error: No se pudo conectar a OCI.${NC}"
