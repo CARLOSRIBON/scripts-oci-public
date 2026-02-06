@@ -50,6 +50,15 @@ echo -e "${GREEN}Tenancy OCID:${NC} $TENANCY_OCID"
 # Encapsula la lógica de autenticación según el entorno
 oci_cmd() {
     if [ "$IS_CLOUD_SHELL" = true ]; then
+        oci "$@" --auth security_token
+    else
+        oci "$@" --profile "$OCI_PROFILE"
+    fi
+}
+
+# Versión silenciosa para operaciones normales (después de verificar conectividad)
+oci_cmd_quiet() {
+    if [ "$IS_CLOUD_SHELL" = true ]; then
         oci "$@" --auth security_token 2>/dev/null
     else
         oci "$@" --profile "$OCI_PROFILE" 2>/dev/null
@@ -58,17 +67,46 @@ oci_cmd() {
 
 # ── Verificar conectividad ───────────────────────────────────────────────────
 echo -e "${YELLOW}Verificando conectividad con OCI...${NC}"
-if ! oci_cmd iam region list > /dev/null; then
-    echo -e "${RED}Error: No se pudo conectar a OCI. Verifique su sesión de Cloud Shell o perfil.${NC}"
+
+# Capturar salida y error para diagnóstico
+OCI_OUTPUT=$(mktemp)
+OCI_ERROR=$(mktemp)
+trap "rm -f $OCI_OUTPUT $OCI_ERROR" EXIT
+
+if [ "$IS_CLOUD_SHELL" = true ]; then
+    oci iam region list --auth security_token > "$OCI_OUTPUT" 2> "$OCI_ERROR"
+    OCI_EXIT_CODE=$?
+else
+    oci iam region list --profile "$OCI_PROFILE" > "$OCI_OUTPUT" 2> "$OCI_ERROR"
+    OCI_EXIT_CODE=$?
+fi
+
+if [ $OCI_EXIT_CODE -ne 0 ]; then
+    echo -e "${RED}Error: No se pudo conectar a OCI.${NC}"
+    echo ""
+    echo -e "${RED}Detalle del error:${NC}"
+    cat "$OCI_ERROR"
+    echo ""
+
     if [ "$IS_CLOUD_SHELL" = true ]; then
-        echo -e "${YELLOW}Tip: En Cloud Shell, si la sesión expiró, cierre y reabra la terminal.${NC}"
+        echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${YELLOW}Posibles soluciones para Cloud Shell:${NC}"
+        echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "  1. ${CYAN}Cierre esta terminal y abra una nueva${NC}"
+        echo -e "  2. ${CYAN}Si el problema persiste, cierre sesión de OCI Console y vuelva a entrar${NC}"
+        echo -e "  3. ${CYAN}Verifique que su usuario tenga permisos para listar regiones${NC}"
+        echo ""
+        echo -e "${YELLOW}Comando de prueba manual:${NC}"
+        echo -e "  ${CYAN}oci iam region list --auth security_token${NC}"
+    else
+        echo -e "${YELLOW}Verifique que el perfil '$OCI_PROFILE' esté configurado correctamente en ~/.oci/config${NC}"
     fi
     exit 1
 fi
 echo -e "${GREEN}✔ Conectividad verificada${NC}"
 
 # ── Obtener nombre del tenancy ───────────────────────────────────────────────
-TENANCY_NAME=$(oci_cmd iam tenancy get --tenancy-id "$TENANCY_OCID" | jq -r '.data.name // empty' 2>/dev/null || true)
+TENANCY_NAME=$(oci_cmd_quiet iam tenancy get --tenancy-id "$TENANCY_OCID" | jq -r '.data.name // empty' 2>/dev/null || true)
 TENANCY_NAME=${TENANCY_NAME:-"Tenancy"}
 echo -e "${GREEN}Tenancy:${NC} $TENANCY_NAME"
 echo ""
@@ -105,7 +143,7 @@ create_banner() {
 #  Tenancy : $TENANCY_NAME
 #  Fecha   : $(date '+%Y-%m-%d %H:%M:%S')
 #  Entorno : $([ "$IS_CLOUD_SHELL" = true ] && echo "Cloud Shell" || echo "Local (perfil: $OCI_PROFILE)")
-#  Región  : ${OCI_REGION:-$(oci_cmd iam region-subscription list --tenancy-id "$TENANCY_OCID" | jq -r '.data[0]."region-name" // "N/A"' 2>/dev/null || echo "N/A")}
+#  Región  : ${OCI_REGION:-$(oci_cmd_quiet iam region-subscription list --tenancy-id "$TENANCY_OCID" | jq -r '.data[0]."region-name" // "N/A"' 2>/dev/null || echo "N/A")}
 #
 ################################################################################
 
@@ -136,7 +174,7 @@ discover_compartment_tree() {
 
     # Buscar subcompartments
     local subcompartments
-    subcompartments=$(oci_cmd iam compartment list \
+    subcompartments=$(oci_cmd_quiet iam compartment list \
         --compartment-id "$compartment_id" \
         --lifecycle-state ACTIVE \
         --all) || true
@@ -178,7 +216,7 @@ search_all_policies() {
         echo -e "${YELLOW}  Analizando: ${compartment_name}${NC}"
 
         local policies policy_count=0 statement_count=0
-        policies=$(oci_cmd iam policy list \
+        policies=$(oci_cmd_quiet iam policy list \
             --compartment-id "$compartment_id" \
             --all) || true
 
@@ -240,7 +278,7 @@ generate_detailed_report() {
 
         if [ "$policy_count" -gt 0 ] 2>/dev/null; then
             local policies
-            policies=$(oci_cmd iam policy list \
+            policies=$(oci_cmd_quiet iam policy list \
                 --compartment-id "$compartment_id" \
                 --all) || true
 
