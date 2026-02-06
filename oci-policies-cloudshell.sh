@@ -48,9 +48,10 @@ echo -e "${GREEN}Tenancy OCID:${NC} $TENANCY_OCID"
 
 # ── Función helper para llamadas OCI CLI ─────────────────────────────────────
 # Encapsula la lógica de autenticación según el entorno
+# En Cloud Shell, la autenticación es automática (delegation token) - no se necesita flag
 oci_cmd() {
     if [ "$IS_CLOUD_SHELL" = true ]; then
-        oci "$@" --auth security_token
+        oci "$@"
     else
         oci "$@" --profile "$OCI_PROFILE"
     fi
@@ -59,7 +60,7 @@ oci_cmd() {
 # Versión silenciosa para operaciones normales (después de verificar conectividad)
 oci_cmd_quiet() {
     if [ "$IS_CLOUD_SHELL" = true ]; then
-        oci "$@" --auth security_token 2>/dev/null
+        oci "$@" 2>/dev/null
     else
         oci "$@" --profile "$OCI_PROFILE" 2>/dev/null
     fi
@@ -76,7 +77,8 @@ trap "rm -f $OCI_OUTPUT $OCI_ERROR" EXIT
 # Desactivar exit on error temporalmente para capturar el código de salida
 set +e
 if [ "$IS_CLOUD_SHELL" = true ]; then
-    oci iam region list --auth security_token > "$OCI_OUTPUT" 2> "$OCI_ERROR"
+    # En Cloud Shell la autenticación es automática (delegation token)
+    oci iam region list > "$OCI_OUTPUT" 2> "$OCI_ERROR"
     OCI_EXIT_CODE=$?
 else
     oci iam region list --profile "$OCI_PROFILE" > "$OCI_OUTPUT" 2> "$OCI_ERROR"
@@ -100,7 +102,7 @@ if [ $OCI_EXIT_CODE -ne 0 ]; then
         echo -e "  3. ${CYAN}Verifique que su usuario tenga permisos para listar regiones${NC}"
         echo ""
         echo -e "${YELLOW}Comando de prueba manual:${NC}"
-        echo -e "  ${CYAN}oci iam region list --auth security_token${NC}"
+        echo -e "  ${CYAN}oci iam region list${NC}"
     else
         echo -e "${YELLOW}Verifique que el perfil '$OCI_PROFILE' esté configurado correctamente en ~/.oci/config${NC}"
     fi
